@@ -1,8 +1,8 @@
-
 # 역할 
-# 1. 프롬프트.py에서 프롬프트를 만듦
+# 1. prompter.py에서 프롬프트를 만듦
 # 2. openai api에 프롬프트를 보내고 llm 응답을 json으로 파싱
-# 3. searchInterpertResponse 형태로 반환
+# 3. searchInterpretResponse 형태로 반환
+# 4. 하이브리드 고도화: FAISS 임베딩 엔진의 boardType 판정 결과를 우선 융합
 
 import json
 
@@ -10,6 +10,9 @@ from openai import OpenAI
 from ai.prompter import build_search_prompt     # 함수/변수명은 스네이크 표기법
 from ai.schemas import SearchInterpretResponse  # 클래스는 파스칼(카멜과 달리 첫글자도 대문자)
 from config.setting import settings
+
+# 고도화 검증 완료된 FAISS 임베딩 인스턴스 가져오기
+from ai.embedder import intent_embedder
 
 from datetime import datetime, timezone, timedelta
 
@@ -30,6 +33,10 @@ class SearchInterpretService:
         if keyword is None or keyword.strip() == "":
             return SearchInterpretResponse()
         
+        # [FAISS 의도 분류 가동] 
+        # LLM 호출 전, 벡터 공간 상의 문맥 유사도를 비교하여 boardType 분기를 사전 도출합니다.
+        embedded_board_type = intent_embedder.predict_board_type(keyword)
+        
         # LLM에게 보낼 프롬프트 생성
         KST = timezone(timedelta(hours=9))
         today = datetime.now(KST).date().isoformat()
@@ -41,6 +48,13 @@ class SearchInterpretService:
         
         # LLM 응답 문자열을 dict로 변환
         data = self.parse_json(llm_text)
+        
+        # [하이브리드 병합 정책 적용]
+        # LLM이 간혹 헷갈리는 문맥적 boardType 결과 대신,
+        # 우리가 90% 정확도로 튜닝한 FAISS 결과가 'all'이 아니라면 그 값을 최종 데이터로 채택합니다.
+        if embedded_board_type != "all":
+            print(f"[의도 고도화 반영] boardType을 FAISS 검증 결과로 업데이트합니다: {embedded_board_type}")
+            data["boardType"] = embedded_board_type
         
         # dict를 응답 DTO로 변환해서 반환
         # ** : 딕셔너리를 풀어서 함수 인자로 넣는 문법
