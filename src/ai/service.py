@@ -8,7 +8,7 @@ import json
 
 from openai import OpenAI
 from ai.prompter import build_search_prompt     # 함수/변수명은 스네이크 표기법
-from ai.schemas import SearchInterpretResponse  # 클래스는 파스칼(카멜과 달리 첫글자도 대문자)
+from ai.schemas import SearchInterpretResponse,SearchInterpretRequest   # 클래스는 파스칼(카멜과 달리 첫글자도 대문자)
 from config.setting import settings
 
 # 고도화 검증 완료된 FAISS 임베딩 인스턴스 가져오기
@@ -27,7 +27,9 @@ class SearchInterpretService:
         
     
     # 검색어를 받아서 LLM 해석 결과를 반환
-    def interpret(self, keyword: str) -> SearchInterpretResponse:
+    def interpret(self, request: SearchInterpretRequest) -> SearchInterpretResponse:
+        
+        keyword = request.keyword
         
         # 검색어가 비어 있으면 기본값 반환
         if keyword is None or keyword.strip() == "":
@@ -49,17 +51,34 @@ class SearchInterpretService:
         # LLM 응답 문자열을 dict로 변환
         data = self.parse_json(llm_text)
         
-        # [하이브리드 병합 정책 적용]
+        # [하이브리드 병합 정책 적용 - 1단계: FAISS 반영]
         # LLM이 간혹 헷갈리는 문맥적 boardType 결과 대신,
         # 우리가 90% 정확도로 튜닝한 FAISS 결과가 'all'이 아니라면 그 값을 최종 데이터로 채택합니다.
         if embedded_board_type != "all":
             print(f"[의도 고도화 반영] boardType을 FAISS 검증 결과로 업데이트합니다: {embedded_board_type}")
             data["boardType"] = embedded_board_type
+            
+        # [하이브리드 병합 정책 적용 - 2단계: UI 선택값 최우선 덮어쓰기] 🚀 추가된 구역
+        # 사용자가 UI에서 '전체(all)'가 아닌 'lost'나 'found'를 명시적으로 선택했다면,
+        # LLM과 FAISS 결과를 모두 무시하고 UI 선택값을 최종 채택합니다.
+        if request.boardType and request.boardType != "all":
+            print(f"[UI 우선순위 반영] 사용자가 화면에서 선택한 boardType으로 강제 변경합니다: {request.boardType}")
+            data["boardType"] = request.boardType
+            
+        # 🚀 [수정] 사용자가 UI에서 날짜를 지정했다면 LLM 추론본을 완전 무시하고 무조건 강제 주입
+        if request.startDate and request.startDate.strip() != "":
+            print(f"[UI 우선순위 반영] startDate 강제 주입: {request.startDate}")
+            data["startDate"] = request.startDate
+        else:
+            data["startDate"] = None # 명시적으로 세팅하여 유실 방지
+            
+        if request.endDate and request.endDate.strip() != "":
+            print(f"[UI 우선순위 반영] endDate 강제 주입: {request.endDate}")
+            data["endDate"] = request.endDate
+        else:
+            data["endDate"] = None
         
         # dict를 응답 DTO로 변환해서 반환
-        # ** : 딕셔너리를 풀어서 함수 인자로 넣는 문법
-        #      딕셔너리의 키와 값을 매개변수와 매개변수 값으로 변경해주는 것
-        # ex) "boardType": "all" -> boardType="all"
         return SearchInterpretResponse(**data)
     
     # AI 호출

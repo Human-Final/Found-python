@@ -34,7 +34,7 @@ def interpret_search(request: SearchInterpretRequest):
 
     try:
         # 서비스에 검색어 전달
-        return search_service.interpret(request.keyword)
+        return search_service.interpret(request)
 
     except Exception as e:
         # 예외 발생 시 FastAPI 형식의 에러 응답 반환
